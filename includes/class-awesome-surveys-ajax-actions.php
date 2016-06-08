@@ -26,7 +26,7 @@ class Awesome_Surveys_Ajax extends Awesome_Surveys {
 	}
 
 	public function add_form_element() {
-		if ( ! current_user_can( 'edit_others_posts' ) || ! wp_verify_nonce( $_POST['_as_nonce'], 'wwm-as-add-element' ) ) {
+		if ( ! current_user_can( 'edit_surveys' ) || ! wp_verify_nonce( $_POST['_as_nonce'], 'wwm-as-add-element' ) ) {
 			status_header( 403 );
 			exit;
 		}
@@ -62,6 +62,9 @@ class Awesome_Surveys_Ajax extends Awesome_Surveys {
 		*/
 	private function element_info_inputs( $form_element = 'Element_Textbox' ) {
 		$elements = array();
+		if ( 'html' === $form_element ) {
+			return $this->add_html_element( 'html' );
+		}
 		/**
 			* Filter hook wwm_survey_validation_elements adds elements to the validation elements array
 			* $elements is an array with keys that hope to be self-explanatory (see the $defaults array below). The 'tag' key may be
@@ -127,6 +130,36 @@ class Awesome_Surveys_Ajax extends Awesome_Surveys {
 						}
 					}
 				}
+				$existing_elements = json_decode( stripslashes( $_POST['existing_elements'] ), true  );
+				if ( ! empty( $existing_elements ) ) {
+					$can_have_options[] = 'dropdown';
+					$types = wp_list_pluck( $existing_elements, 'type' );
+					$has_options = false;
+					foreach ( $can_have_options as $type ) {
+						if ( in_array( $type, $types ) ) {
+							$has_options = true;
+							break;
+						}
+					}
+					if ( $has_options ) {
+						$html .= '<label for="enable-conditional-logic">' . __( 'Enable conditional logic?', 'awesome-surveys' );
+						$html .= '<br /><input id="enable-conditional-logic" type="checkbox" name="enable-conditional-logic" value="1" /></label>';
+						$html .= '<div id="conditional_on">';
+						$html .= '<label>' . __( 'Show if', 'awesome_surveys' ) . '<select name="options[validation][rules][conditional_on]">';
+						$html .= '<option value="">' . __( 'Choose an option...', 'awesome-surveys' ) . '</option>';
+						foreach ( $existing_elements as $index => $question ) {
+							if ( ! in_array( $question['type'], $can_have_options ) ) {
+								continue;
+							}
+							$html .= '<optgroup label="' . $question['name'] . ' ' . __( 'is answered with..', 'awesome-surveys') . '">';
+								foreach ( $question['label'] as $key => $value ) {
+									$html .= '<option value="[' . $index . '[' . $key . ']]">' . $value . '</option>';
+								}
+								$html .= '</optgroup>';
+						}
+						$html .= '</select></label></div>';
+					}
+				}
 				if ( 'textarea' == $form_element ) {
 					$html .= '<label>' . __( 'Display number of characters remaining?', 'awesome-surveys' ) . '<br><input id="add-countdown" type="checkbox" name="options[add_countdown]"></label>';
 				}
@@ -138,7 +171,7 @@ class Awesome_Surveys_Ajax extends Awesome_Surveys {
 			$html .= '<span class="label">' . __( 'Number of answers required?', 'awesome-surveys' ) . '</span><div class="slider-wrapper"><div id="slider"></div><div class="slider-legend"></div></div><div id="options-holder">';
 			$html .= $this->options_fields( array( 'num_options' => 1, 'ajax' => false ) );
 			$html .= '</div>';
-			$html .= '<p><button class="button-primary" name="options-default-none">' . __( 'Clear default', 'awesome-surveys' ) . '</button></p>';
+			$html .= '<p><button class="button-primary" name="options-default-none">' . __( 'Clear Default', 'awesome-surveys' ) . '</button></p>';
 		}
 
 		$html .= '<p><button class="button-primary">' . __( 'Add Question', 'awesome-surveys' ) . '</button></p>';
@@ -347,7 +380,7 @@ class Awesome_Surveys_Ajax extends Awesome_Surveys {
 	public function update_post_content() {
 		$form_args = array( 'survey_id' => $_POST['survey_id'] );
 		$this->existing_elements = json_decode( stripslashes( $_POST['existing_elements'] ), true );
-		if ( ! $this->existing_elements ) {
+		if ( ! is_array( $this->existing_elements ) ) {
 			wp_send_json_error( array( sprintf( '%s %s of %s', __( 'There was an error on line ', 'awesome-surveys' ), __LINE__, __FILE__ ) ) );
 		}
 		$post_content = $this->awesome_surveys_render_form( $form_args );
@@ -366,14 +399,23 @@ class Awesome_Surveys_Ajax extends Awesome_Surveys {
 			status_header( 403 );
 			exit;
 		}
+		$options = get_option( 'wwm_awesome_surveys_options', array() );
 		$survey_id = absint( $_POST['survey_id'] );
+		if ( $this->is_captcha_enabled_for_post( $survey_id ) ) {
+			$args = array( 'body' => array( 'secret' => $options['general_options']['captcha_secret_key'], 'response' => $_POST['g-recaptcha-response'] ) );
+			$recaptcha_response = wp_remote_post( 'https://www.google.com/recaptcha/api/siteverify', $args );
+			$recaptcha_success = json_decode( $recaptcha_response['body'] );
+			if ( ! $recaptcha_success->success ) {
+				wp_send_json_error( array( 'error' => $recaptcha_success->{'error-codes'}[0] ) );
+			}
+		}
 		$post = get_post( $survey_id, 'OBJECT', 'display' );
 		if ( 'publish' != $post->post_status ) {
 			$data = array( __( 'Answers not saved. Survey in draft status.', 'awesome-surveys' ) );
 			wp_send_json_error( $data );
 		}
 		$saved_answers = get_post_meta( $survey_id, '_response', false );
-		$existing_elements = json_decode( stripslashes( get_post_meta( $survey_id, 'existing_elements', true ) ), true );
+		$existing_elements = json_decode( get_post_meta( $survey_id, 'existing_elements', true ), true );
 		$responses = array();
 		$auth_type = get_post_meta( $survey_id, 'survey_auth_method', true );
 		$auth_method = $this->auth_methods[ $auth_type ]['name'];
@@ -440,9 +482,47 @@ class Awesome_Surveys_Ajax extends Awesome_Surveys {
 			);
 		do_action( 'awesome_surveys_update_' . $auth_method, $action_args );
 		do_action( 'wwm_as_response_saved', array( $survey_id, $responses, $existing_elements, $respondent_key ) );
-		$data = $post->post_excerpt;
+
 		$redirect_url_after_answer = get_post_meta( $survey_id, 'redirect_url_after_answer', true );
 		$redirect_timeout_after_answer = get_post_meta( $survey_id, 'redirect_timeout_after_answer', true );
+		$data = $post->post_excerpt;
+		if ( ! empty( $redirect_url_after_answer ) ) {
+			/* translators: the placeholders %s and %d represent the redirect url and the number of seconds before a redirect respectively */
+		 $data = $data . ' ' . sprintf( __( 'You will be redirected to %s in %d seconds', 'awesome-surveys' ), $redirect_url_after_answer,  $redirect_timeout_after_answer );
+		}
 		wp_send_json_success( array( 'thank_you' => $data, 'url' => $redirect_url_after_answer, 'urltimeout' => $redirect_timeout_after_answer ) );
+	}
+
+	/**
+	 * AJAX handler to delete survey responses
+		* @since 2.1
+	 */
+	public function delete_responses() {
+		if ( ! current_user_can( 'edit_published_surveys' ) || ! wp_verify_nonce( $_POST['nonce'], 'wwm-delete-results' ) ) {
+			status_header( 403 );
+			exit;
+		}
+		$deleted = delete_post_meta( absint( $_POST['post_id'] ), '_response' );
+		if ( $deleted ) {
+			wp_send_json_success();
+		} else {
+			wp_send_json_error();
+		}
+	}
+
+	/**
+	* AJAX handler for the bit that adds custom HTML to the form
+	* @since 2.1
+	*/
+	function add_html_element( $form_element = 'html' ) {
+		global $allowedtags;
+
+		$html = '<div class="pure-form pure-form-stacked">';
+		$html .= '<input type="hidden" name="action" value="generate-preview">';
+		$html .= '<input type="hidden" name="options[type]" value="' . $form_element . '">';
+		$html .= '<p><label>' . __( 'Enter your custom HTML', 'awesome-surveys' ) . '<br><textarea name="options[name]"/></label></p>';
+		$html .= '<p><button class="button-primary">' . __( 'Add Question', 'awesome-surveys' ) . '</button></p>';
+		$html .= '</div>';
+		return $html;
 	}
 }

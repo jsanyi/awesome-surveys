@@ -30,9 +30,6 @@ class Awesome_Surveys_Admin extends Awesome_Surveys {
 			'post_row_actions' => array( 'post_row_actions', 10, 2 ),
 			);
 
-		foreach ( $actions as $key => $action ) {
-			add_action( $key, array( $this, $action[0] ), $action[1], $action[2] );
-		}
 		foreach ( $filters as $key => $filter ) {
 			add_filter( $key, array( $this, $filter[0] ), $filter[1], $filter[2] );
 		}
@@ -46,7 +43,7 @@ class Awesome_Surveys_Admin extends Awesome_Surveys {
 		if ( isset( $_POST['existing_elements'] ) ) {
 			$existing_elements = $_POST['existing_elements'];
 			$this->existing_elements = $existing_elements;
-			if ( json_decode( stripslashes( $existing_elements ) ) ) {
+			if ( is_array( json_decode( stripslashes( $existing_elements ) ) ) ) {
 				update_post_meta( $post_id, 'existing_elements', $existing_elements );
 			}
 		}
@@ -54,13 +51,18 @@ class Awesome_Surveys_Admin extends Awesome_Surveys {
 			update_post_meta( $post_id, 'survey_auth_method', absint( $_POST['meta']['survey_auth_method'] ) );
 		}
 		if ( isset( $_POST['meta']['redirect_url_after_answer'] ) ) {
-			$url = trim($_POST['meta']['redirect_url_after_answer']);
-			if ( empty($url) || filter_var($url, FILTER_VALIDATE_URL ) !== false) {
+			$url = esc_url( trim( $_POST['meta']['redirect_url_after_answer'] ) );
+			if ( ! empty( $url ) && filter_var( $url, FILTER_VALIDATE_URL ) !== false) {
 				update_post_meta( $post_id, 'redirect_url_after_answer', $url );
 			}
 		}
 		if ( isset( $_POST['meta']['redirect_timeout_after_answer'] ) ) {
 			update_post_meta( $post_id, 'redirect_timeout_after_answer', absint( $_POST['meta']['redirect_timeout_after_answer'] ) );
+		}
+		if ( isset( $_POST['meta']['captcha_enabled'] ) ) {
+			update_post_meta( $post_id, 'captcha_enabled', absint( $_POST['meta']['captcha_enabled'] ) );
+		} else {
+			update_post_meta( $post_id, 'captcha_enabled', 0 );
 		}
 	}
 
@@ -73,15 +75,16 @@ class Awesome_Surveys_Admin extends Awesome_Surveys {
 	public function admin_enqueue_scripts() {
 		$defaults = array(
 			'num_answers' => 10,
+			'clear_default' => __( 'Clear Default', 'awesome-surveys' ),
 			);
 		$args = apply_filters( 'wwm_as_admin_script_vars', $defaults );
 		$args = wp_parse_args( $args, $defaults );
 		$suffix = defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG ? '' : '.min';
 		wp_register_script( 'jquery-validation-plugin', WWM_AWESOME_SURVEYS_URL . '/js/jquery.validate.min.js', array( 'jquery' ), '1.13.0' );
 
-		wp_register_style( 'normalize-css', WWM_AWESOME_SURVEYS_URL . '/css/normalize' . $suffix . '.css' );
+		wp_register_style( 'normalize-css', WWM_AWESOME_SURVEYS_URL . '/css/normalize.min.css' );
 		wp_register_style( 'jquery-ui-smoothness', WWM_AWESOME_SURVEYS_URL . '/css/jquery-ui.min.css', array( 'wp-admin' ), '1.10.13', 'all' );
-		wp_register_style( 'pure-forms-css', WWM_AWESOME_SURVEYS_URL . '/css/forms' . $suffix . '.css', array( 'normalize-css' ) );
+		wp_register_style( 'pure-forms-css', WWM_AWESOME_SURVEYS_URL . '/css/forms.min.css', array( 'normalize-css' ) );
 
 		wp_register_script( $this->text_domain . '-options-script', WWM_AWESOME_SURVEYS_URL . '/js/options' . $suffix . '.js', array( 'jquery', 'jquery-ui-accordion', 'postbox' ), $this->plugin_version, true );
 		wp_register_script( $this->text_domain . '-view-results', WWM_AWESOME_SURVEYS_URL . '/js/results' . $suffix . '.js', array( 'jquery', 'postbox', 'jquery-ui-accordion' ), $this->plugin_version, true );
@@ -96,6 +99,10 @@ class Awesome_Surveys_Admin extends Awesome_Surveys {
 				wp_enqueue_script( $this->text_domain . '-view-results' );
 				wp_enqueue_style( $this->text_domain . '-results-style' );
 			}
+		}
+		if ( 'edit-awesome-surveys' === $screen->id ) {
+			wp_enqueue_script( $this->text_domain . '-edit-screen-script', WWM_AWESOME_SURVEYS_URL . '/js/edit-screen-script' . $suffix . '.js', $deps = array( 'jquery' ), $this->plugin_version, true );
+			wp_localize_script( $this->text_domain . '-edit-screen-script', 'wwm_edit_screen', array( 'confirm' => __( 'Do you really want to delete these results? This action can not be undone.', 'awesome-surveys' ), 'failure_message' => __( 'Error: Operation Failed', 'awesome_surveys' ) ) );
 		}
 	}
 
@@ -123,12 +130,12 @@ class Awesome_Surveys_Admin extends Awesome_Surveys {
 		$plugin_panel_version = 2;
 		add_filter( 'wwm_plugin_links', array( $this, 'this_plugin_link' ) );
 		if ( empty( $_wwm_plugins_page ) || ( is_array( $_wwm_plugins_page ) && $plugin_panel_version > $_wwm_plugins_page[1] ) ) {
-			$_wwm_plugins_page[0] = add_menu_page( 'WtWM Plugins', 'WtWM Plugins', 'edit_others_posts', 'wwm_plugins', array( $this, 'wwm_plugin_links' ), WWM_AWESOME_SURVEYS_URL . '/images/wwm_wp_menu.png', '90.314' );
+			$_wwm_plugins_page[0] = add_menu_page( 'WtWM Plugins', 'WtWM Plugins', 'edit_surveys', 'wwm_plugins', array( $this, 'wwm_plugin_links' ), WWM_AWESOME_SURVEYS_URL . '/images/wwm_wp_menu.png', '90.314' );
 			$_wwm_plugins_page[1] = $plugin_panel_version;
 		}
-		$this->page_hook = add_submenu_page( 'wwm_plugins', $this->page_title, $this->menu_title, 'edit_others_posts', $this->menu_slug, array( &$this, 'plugin_options' ) );
-		add_submenu_page( 'wwm_plugins', '', __( 'My Surveys', 'awesome-surveys' ), 'edit_others_posts', 'edit.php?post_type=awesome-surveys' );
-		add_submenu_page( 'wwm_plugins', '', __( 'New Survey', 'awesome-surveys' ), 'edit_others_posts', 'post-new.php?post_type=awesome-surveys' );
+		$this->page_hook = add_submenu_page( 'wwm_plugins', $this->page_title, $this->menu_title, 'manage_options', $this->menu_slug, array( $this, 'plugin_options' ) );
+		add_submenu_page( 'wwm_plugins', '', __( 'My Surveys', 'awesome-surveys' ), 'edit_surveys', 'edit.php?post_type=awesome-surveys' );
+		add_submenu_page( 'wwm_plugins', '', __( 'New Survey', 'awesome-surveys' ), 'edit_surveys', 'post-new.php?post_type=awesome-surveys' );
 		add_action( 'admin_print_scripts-' . $this->page_hook, array( $this, 'admin_print_scripts' ) );
 		add_action( 'admin_print_styles-' . $this->page_hook, array( $this, 'admin_print_styles' ) );
 	}
@@ -221,8 +228,10 @@ class Awesome_Surveys_Admin extends Awesome_Surveys {
 			$edit_post_link = get_edit_post_link( $post->ID, true );
 			$duplicate_url = admin_url( 'post.php?post=' . $post->ID . '&action=duplicate&duplicate_survey_nonce=' . $nonce );
 			$show_link = get_post_meta( $post->ID, '_response', true );
-			if ( ! empty( $show_link ) ) {
+			if ( ! empty( $show_link ) && ( current_user_can( 'edit_others_surveys' ) || $post->post_author == get_current_user_id() ) ) {
+				$delete_results_nonce = wp_create_nonce( 'wwm-delete-results' );
 				$actions['results'] = '<a href="' . $edit_post_link . '&amp;view=results' . '" title="' . __( 'View Survey Results', 'awesome-surveys' ) . '">' . __( 'Results', 'awesome-surveys' ) . '</a>';
+				$actions['clear_results'] = '<a class="delete-results" title="' . __( 'Delete Survey Results', 'awesome-surveys' ) . '" href="#" data-nonce="' . $delete_results_nonce .'" data-postid="' . $post->ID . '">' . __( 'Delete Results', 'awesome-surveys' ) . '</a>';
 			}
 			$actions['duplicate'] = '<a href="' . $duplicate_url . '" title="' . __( 'Create a copy of this survey', 'awesome-surveys' ) . '">' . __( 'Duplicate', 'awesome-surveys' ) . '</a>';
 		}
@@ -379,7 +388,7 @@ class Awesome_Surveys_Admin extends Awesome_Surveys {
 			foreach ( $results as $key => $value ) {
 				$results_keys[] = array_keys( $value );
 			}
-			$elements = json_decode( stripslashes( get_post_meta( $post_id, 'existing_elements', true ) ), true );
+			$elements = json_decode( get_post_meta( $post_id, 'existing_elements', true ), true );
 			foreach ( $results as $respondent_key => $answers ) {
 				$auth_method = get_post_meta( $post_id, 'survey_auth_method', true );
 				$auth_type = $this->auth_methods[ $auth_method ]['name'];
@@ -424,6 +433,9 @@ class Awesome_Surveys_Admin extends Awesome_Surveys {
 		$questions = $args['args'][1];
 		$answers = reset( $args['args'][0][ $args['args'][2] ] );
 		foreach ( $questions as $key => $question ) {
+			if ( 'html' == $question['type'] ) {
+				continue;
+			}
 			$response = null;
 			$has_options = array( 'dropdown', 'radio', 'checkbox' );
 			$label = $question['name'];
@@ -481,6 +493,9 @@ class Awesome_Surveys_Admin extends Awesome_Surveys {
 			return array(
 			'general_options' => array(
 				'include_css' => 1,
+				'enable_captcha' => 0,
+				'captcha_site_key' => null,
+				'captcha_secret_key' => null,
 				),
 			'email_options' => array(
 				'enable_emails' => 0,

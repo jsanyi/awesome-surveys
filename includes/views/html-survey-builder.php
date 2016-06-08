@@ -19,6 +19,9 @@ $form_preview_html = $awesome_surveys->get_form_preview_html( $post->ID );
 		<h4><?php _e( 'Add a form element to your survey by clicking a button', 'awesome-surveys' ); ?></h4>
 		<?php
 		foreach ( $awesome_surveys->buttons as $name => $value ) {
+			if ( ! current_user_can( 'unfiltered_html') && 'html' === $name ) {
+				continue;
+			}
 			echo '<button name="' . $name . '" data-nonce="' . $nonce . '">' . $value['label'] . '</button>' . "\n";
 		}
 		/*
@@ -34,7 +37,7 @@ $form_preview_html = $awesome_surveys->get_form_preview_html( $post->ID );
 
 		function my_handler_function() {
 			//just an example for the default handler - do as you please
-			if ( ! current_user_can( 'edit_others_posts' ) || ! wp_verify_nonce( $_POST['_as_nonce'], 'wwm-as-add-element' ) ) {
+			if ( ! current_user_can( 'edit_surveys' ) || ! wp_verify_nonce( $_POST['_as_nonce'], 'wwm-as-add-element' ) ) {
 				status_header( 403 );
 				exit;
 			}

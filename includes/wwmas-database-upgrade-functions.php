@@ -220,7 +220,7 @@ function wwmas_remove_unset_responses( $value ) {
 }
 
 function wwmas_translate_post_content() {
-	if ( ! current_user_can( 'edit_others_posts' ) ) {
+	if ( ! current_user_can( 'manage_options' ) ) {
 		die( 'not authorized' );
 	}
 	$query_args = array(
@@ -236,7 +236,7 @@ function wwmas_translate_post_content() {
 			$args = array(
 			'survey_id' => $survey_id,
 			);
-			$elements = wwmas_convert_elements( json_decode( get_post_meta( $survey_id, 'existing_elements', true ), true ) );
+			$elements = wwmas_convert_elements( json_decode( stripslashes( stripslashes( get_post_meta( $survey_id, 'existing_elements', true ) ) ), true ) );
 			$content = wwmas_post_content_generator( $args, $elements );
 			$postarr = array(
 				'ID' => $survey_id,

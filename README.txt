@@ -2,8 +2,8 @@
 Contributors: WilltheWebMechanic, tobyhawkins, tofuSCHNITZEL
 License: GPLv3.0+
 Requires at least: 3.9.1
-Tested up to: 4.2.2
-Stable tag: 2.0.8
+Tested up to: 4.4
+Stable tag: 2.1
 Tags: survey, form builder, survey form, data collection, feedback, free, plugin, polls, questionaire, poll builder, opinion, customer satisfaction
 Donate Link: http://www.willthewebmechanic.com/awesome-surveys/
 
@@ -104,9 +104,28 @@ as 'post_content'. This means that if WordPress was in English when you built th
 3. Survey form output on the frontend
 4. The thank you message displayed after the survey has been submitted
 5. Survey results view
+6. How to View Results - Hover your mouse, click link
 
 
 == Changelog ==
+= v2.1 El Valle de Jovel =
+1. *Feature* Add ability to delete survey responses
+2. *Feature* Add custom HTML element to surveys
+3. *Feature* Option to add captchas to surveys
+4. *Enhancement* On multisite - if survey author does not have 'unfiltered_html' capability, generate the form on-the-fly for frontend output.
+5. Use built in filter when doing shortcode rather than filtering the content in the shortcode callback.
+
+= v2.0.10 =
+1. *FIX* Single quotes break JSON encode/decoding - hopefully fixed
+2. Added a "translate" button to the survey options panel - if you have changed your site language since creating a survey, you can use this button to translate the static form existing_elements
+3.Results display tweaks
+4. User Contributed: Added a button to reset default selection for radios/checkboxes
+5. User Contributed: Added Hungarian translation
+6. User Contributed: Redirect after survey completion now in the interface with the ability to designate a number of seconds before redirect
+
+= v2.0.9 =
+1. *FIX* - improper escaping/unescaping
+
 = v2.0.8 =
 1. *FIX* - in cases where values are escaped when json encoding - unescape those before json decoding
 

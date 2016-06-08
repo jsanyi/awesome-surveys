@@ -6,7 +6,7 @@ class Awesome_Surveys {
 	public $text_domain, $buttons, $plugin_version, $dbversion;
 
 	public function __construct() {
-		$this->plugin_version = '2.0.8';
+		$this->plugin_version = '2.1';
 		$this->text_domain = 'awesome-surveys';
 		$this->dbversion = '1.2';
 		$this->buttons = $this->get_buttons();
@@ -52,6 +52,10 @@ class Awesome_Surveys {
 				'type' => 'Element_Textarea',
 				'label' => __( 'Textarea', 'awesome-surveys' ),
 					),
+				'html' => array(
+					'type' => 'Element_HTML',
+					'label' => __( 'Custom HTML', 'awesome-surveys' ),
+				),
 		);
 	}
 
@@ -74,6 +78,7 @@ class Awesome_Surveys {
 				),
 			'description' => __( 'Surveys for your site', 'awesome-surveys' ),
 			'public' => true,
+			'map_meta_cap' => true,
 			'capability_type' => 'post',
 			'exclude_from_search' => true,
 			'publicly_queryable' => true,
@@ -95,8 +100,7 @@ class Awesome_Surveys {
 
 	/**
 		* Builds the survey form from the stored options in the database.
-		* @param  array $form an array of form elements - this array was stored in the db when the survey was created
-		* @param  array $args an array of arguments, includes the survey id and the survey name
+		* @param  array $args an array of arguments (only 'survey_id' at this time)
 		* @return string an html form
 		* @since  1.0
 		* @author Will the Web Mechanic <will@willthewebmechanic.com>
@@ -179,11 +183,15 @@ class Awesome_Surveys {
 		* @link http://willthewebmechanic.com
 		*/
 	public function awesome_surveys_form_preview( $form_elements_array ) {
-
+		if ( 'html' === $form_elements_array['type'] ) {
+			$form_elements_array['name'] = balanceTags( wp_kses_post( $form_elements_array['name'] ), true );
+			return $form_elements_array;
+		}
 		$defaults = array(
 			'required' => false,
 			'rules' => array(),
 		);
+		$form_elements_array['name'] = stripslashes( $form_elements_array['name'] );
 		$form_elements_array['validation'] = wp_parse_args( ( isset( $form_elements_array['validation'] ) ) ? $form_elements_array['validation'] : array(), $defaults );
 		if ( isset( $form_elements_array['validation']['rules'] ) ) {
 			unset( $form_elements_array['validation']['rules']['number_validation_type'] );
@@ -205,20 +213,42 @@ class Awesome_Surveys {
 	 * @param   $content string - the WordPress post content
 	 * @return string  the filtered content
 	 */
-	public function the_content( $content ) {
+	public function the_content( $content, $args = array() ) {
 		global $post;
-		if ( is_singular( 'awesome-surveys' ) ) {
+		$defaults = array(
+			'survey_id' => $post->ID,
+			'post_type' => $post->post_type,
+			'post_author' => $post->post_author,
+		);
+		$args = wp_parse_args( $args, $defaults );
+		extract( $args );
+		if ( is_singular() && 'awesome-surveys' === $post_type ) {
+
+				/*
+				On multisite, only network admins can post unfiltered html so the stored html
+				is stripped. This will fetch the json string stored in 'existing_elements' and generate the
+				form on the fly if on multisite and the user does not have the unfiltered_html capability.
+				*/
+				if ( user_can( absint( $post_author ), 'publish_surveys' ) && ! user_can( absint( $post_author ), 'unfiltered_html' ) ) {
+					$this->existing_elements = json_decode( get_post_meta( $survey_id, 'existing_elements', true ), true );
+					$content = $this->awesome_surveys_render_form( array( 'survey_id' => $survey_id ) );
+				}
 			$nonce = wp_create_nonce( 'answer-survey' );
-			$auth_method = get_post_meta( $post->ID, 'survey_auth_method', true );
+			$auth_method = get_post_meta( $survey_id, 'survey_auth_method', true );
 			$auth_type = $this->auth_methods[ $auth_method ]['name'];
 			$auth_args = array(
-				'survey_id' => $post->ID,
+				'survey_id' => $survey_id,
 			);
 			if ( false !== apply_filters( 'awesome_surveys_auth_method_' . $auth_type, $auth_args ) ) {
 				$content = str_replace( 'value="answer_survey_nonce"', 'value="' . $nonce . '"', $content );
 			} else {
 				return apply_filters( 'wwm_survey_no_auth_message', sprintf( '<p>%s</p>', __( 'Your response to this survey has already been recorded. Thank you!', 'awesome-surveys' ) ) );
 			}
+		}
+		if ( $this->is_captcha_enabled_for_post( $survey_id ) ) {
+			//decided to filter the HTML here for backwards compat :(
+			$options = get_option( 'wwm_awesome_surveys_options', array() );
+			$content = str_replace( '<input type="submit"', '<span id="recaptcha-error" class="error hidden">' . __( 'Captcha Required', 'awesome-surveys' ) . '</span><input type="hidden" class="hiddenRecaptcha required" name="hiddenRecaptcha" id="hiddenRecaptcha"><div class="g-recaptcha" data-sitekey="' . $options['general_options']['captcha_site_key'] . '" data-callback="hideRecaptchaError"></div><input type="submit"', $content );
 		}
 		return $content;
 	}
@@ -376,7 +406,7 @@ class Awesome_Surveys {
 		$args = array( $survey_id, $responses, $existing_elements, $respondent_id )
 			*/
 		$form = $args[2];
-		$answers = $args[1][ $args[3] ];
+		$answers = ( isset( $args[1] ) && isset( $args[1][ $args[3] ] ) ? $args[1][ $args[3] ] : array() );
 		$options = get_option( 'wwm_awesome_surveys_options', array() );
 		if ( isset( $options['email_options'] ) && $options['email_options']['enable_emails'] ) {
 			$subject = apply_filters( 'wwm_as_admin_email_subject', __( 'Survey Completed', 'awesome-surveys' ) );
@@ -423,7 +453,7 @@ class Awesome_Surveys {
 		}
 	}
 
-		protected function get_form_preview_html( $post_id = 0 ) {
+	protected function get_form_preview_html( $post_id = 0 ) {
 
 		$output = null;
 		if ( ! class_exists( 'Form' ) ) {
@@ -481,12 +511,18 @@ class Awesome_Surveys {
 					$has_responses = get_post_meta( $post_id, '_response', true );
 					$class = ( empty( $has_responses ) ) ? 'single-element-edit' : 'label-edit';
 					$form->addElement( new Element_HTML( '<div class="' . $class . '">' ) );
-					$form->addElement( new $method( htmlentities( stripslashes( $element['name'] ) ), sanitize_title( $element['name'] ), $options, $atts ) );
+					if ( 'Element_HTML' == $method ) {
+						$form->addElement( new Element_HTML( balanceTags( wp_kses_post( $element['name'] ), true ) ) );
+					} else {
+						$form->addElement( new $method( htmlentities( stripslashes( $element['name'] ) ), sanitize_title( $element['name'] ), $options, $atts ) );
+					}
 						$form->addElement( new Element_HTML( '<div class="button-holder">' ) );
+						$word = ( 'html' == $element['type'] ) ? 'HTML' : __( 'question', 'awesome-surveys' );
+						$edit_button_html = ( 'html' == $element['type'] ) ? '' : '<button class="element-edit" data-action="edit" data-index="' . $elements_count . '">' . __( 'Edit question', 'awesome-surveys' ) . '</button>';
 						if ( empty( $has_responses ) ) {
-							$form->addElement( new Element_HTML( '<button class="element-edit" data-action="delete" data-index="' . $elements_count . '">' . __( 'Delete question', 'awesome-surveys' ) . '</button><button class="element-edit" data-action="edit" data-index="' . $elements_count . '">' . __( 'Edit question', 'awesome-surveys' ) . '</button>' ) );
+							$form->addElement( new Element_HTML( '<button class="element-edit" data-action="delete" data-index="' . $elements_count . '">' . sprintf( '%s %s', __( 'Delete', 'awesome-surveys' ), $word ) . '</button>' . $edit_button_html ) );
 						} else {
-							$form->addElement( new Element_HTML( '<button class="element-label-edit" data-action="edit" data-index="' . $elements_count . '">' . __( 'Edit question', 'awesome-surveys' ) . '</button>' ) );
+							$form->addElement( new Element_HTML( $edit_button_html ) );
 						}
 						$form->addElement( new Element_HTML( '</div><div class="clear"></div></div>' ) );
 					$elements_count++;
@@ -504,5 +540,26 @@ class Awesome_Surveys {
 		$replacement = '</div';
 		$output = preg_replace( $pattern, $replacement, $output );
 		return $output;
+	}
+
+	/**
+	 * checks if the captcha is enabled for a post
+	 * @param  integer $post_id the post id
+	 * @return boolean          whether or not the captcha is enabled for this post
+	 * @since 2.1
+	 */
+	protected function is_captcha_enabled_for_post( $post_id = 0 ) {
+		$enabled = get_post_meta( $post_id, 'captcha_enabled', true );
+		return ( $enabled && $this->is_captcha_enabled() );
+	}
+
+	/**
+	 * checks if captcha settings are enabled and filled out
+	 * @return boolean whether or not the options have been set to enable captcha_secret_key
+	 * @since 2.1
+	 */
+	protected function is_captcha_enabled() {
+		$options = get_option( 'wwm_awesome_surveys_options', array() );
+		return ( ! empty( $options['general_options']['enable_captcha'] ) && ! empty( $options['general_options']['captcha_site_key'] ) && ! empty( $options['general_options']['captcha_secret_key'] ) );
 	}
 }

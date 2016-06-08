@@ -1,5 +1,4 @@
 jQuery('document').ready(function($) {
-
 	$("#awesome-survey .overlay").hide()
 	if (typeof $('#form-preview').html() != 'undefined' && $('#form-preview').html().length > 0) {
 		previewReady($)
@@ -7,13 +6,18 @@ jQuery('document').ready(function($) {
 
 	$('#survey-elements-buttons button').button().click(function(e) {
 		e.preventDefault()
+		existingElements = $('#existing_elements').val()
 		$.post(ajaxurl, {
 			action: 'add-form-element',
 			element: $(this).attr('name'),
-			_as_nonce: $(this).data('nonce')
+			_as_nonce: $(this).data('nonce'),
+			existing_elements: existingElements
 		}, function(html) {
 			$('#current-element').empty().append(html)
 			existingElements = $('#existing_elements')
+			$('input#enable-conditional-logic').on('click', function() {
+				$('#conditional_on').toggle($(this).is(':checked'))
+			})
 			if ('undefined' != typeof existingElements && 'undefined' != typeof existingElements.val()) {
 				$('#existing_elements').val(existingElements.val())
 			}
@@ -53,7 +57,7 @@ jQuery('document').ready(function($) {
 				}
 			})
 			$('#current-element button').button()
-			$('#current-element').on('click', 'button[name=options-default-none]', function(e) {
+			$('#current-element').on('click', 'button[name="options-default-none"]', function(e) {
 				$('input[name="options[default]"]').prop('checked', false)
 				e.preventDefault()
 				e.stopImmediatePropagation()
@@ -129,7 +133,8 @@ jQuery('document').ready(function($) {
 										target = $('.controls', container)
 										setName = $('[type="' + type + '"]:first', target).attr('name');
 										for (key in elementsJSON[index].value) {
-											newHtml += '<label class="' + type + '"><input type="' + type + '" name="' + setName + '" value="' + key + '"'
+											newHtml += '<label class="' + type + '"><input type="' + type + '" name="' + setName +
+												'" value="' + key + '"'
 											if (key == elementsJSON[index]['default']) {
 												newHtml += ' checked="checked"'
 											}
@@ -200,8 +205,8 @@ jQuery('document').ready(function($) {
 			})
 		}
 		elementsJSON = removeNulls(elementsJSON)
+		elementsJSON = (elementsJSON == null) ? [] : elementsJSON
 		$('#existing_elements').val(JSON.stringify(elementsJSON)).trigger('change')
-
 	})
 
 	$('#form-preview').on('click', 'input[name="reset"]', function(e) {
@@ -229,16 +234,18 @@ jQuery('document').ready(function($) {
 			existing_elements: $('#existing_elements').val(),
 			action: 'update-post-content'
 		}, function(data) {
-			if ( data.success ) {
+			if (data.success) {
 				$('#content').val(data.data)
 			} else {
 				alert(data.data);
 			}
 		})
 	})
-	$('textarea, input[type="email"], input[type="number"], input[type="text"] ', '#form-preview-wrapper').on('keyup', function() {
-		$(this).val('')
-	})
+	$('textarea, input[type="email"], input[type="number"], input[type="text"] ', '#form-preview-wrapper').on(
+		'keyup',
+		function() {
+			$(this).val('')
+		})
 })
 
 function getPreview($) {
@@ -255,7 +262,7 @@ function getPreview($) {
 
 //added in 1.4.3 to properly reindex edit question and delete question buttons when questions re-ordered
 function renumberButtons($) {
-	var parent = $('.survey-preview form')
+	var parent = $('div#pfbc')
 	$('.single-element-edit', parent).each(function() {
 		$('.button-holder button[data-index]', $(this)).attr('data-index', $(this).index())
 	})
@@ -264,6 +271,7 @@ function renumberButtons($) {
 }
 
 function previewReady($) {
+	var startingIndex, endingIndex
 	$('#form-preview button').button()
 	$('#current-element').empty()
 	$('#current-element-wrapper').hide()
@@ -282,6 +290,7 @@ function previewReady($) {
 				surveyElements.splice(endingIndex, 0, activeElement)
 				$('#existing_elements').val(JSON.stringify(surveyElements))
 				renumberButtons($)
+				fixConditionals(parseInt(startingIndex), parseInt(endingIndex), $)
 			}
 		}
 	})
@@ -294,33 +303,41 @@ function previewReady($) {
 }
 
 function generateDynamicDialog(obj) {
-	html = '<div class="dyn-diag"><form class="pure-form pure-form-stacked form-horizontal" method="post" action=""><input type="text" name="options[name]" value="'
-	html += '" required="required"><label for="required-checkbox">Required? </label><input id="required-checkbox" type="checkbox" name="options[validation][required]" value="1"'
+	html =
+		'<div class="dyn-diag"><form class="pure-form pure-form-stacked form-horizontal" method="post" action=""><input type="text" name="options[name]" value="'
+	html +=
+		'" required="required"><label for="required-checkbox">Required? </label><input id="required-checkbox" type="checkbox" name="options[validation][required]" value="1"'
 	if (typeof obj.validation != 'undefined' && typeof obj.validation.required != 'undefined' && 1 == obj.validation.required) {
 		html += ' checked="checked"'
 	}
 	html += '>'
 	if ('undefined' != typeof obj.label) {
-		display = ('undefined' != typeof obj.atts && 'undefined' != typeof obj.atts.can_add_options && 'yes' == obj.atts.can_add_options) ? 'block' : 'none'
-		html += '<div class="slider-wrapper" style="display:' + display + ';"><div id="edit-slider"></div><div class="slider-legend"></div></div>'
+		display = ('undefined' != typeof obj.atts && 'undefined' != typeof obj.atts.can_add_options && 'yes' == obj.atts
+			.can_add_options) ? 'block' : 'none'
+		html += '<div class="slider-wrapper" style="display:' + display +
+			';"><div id="edit-slider"></div><div class="slider-legend"></div></div>'
 		html += '<p style="display:' + display + ';">answers:</p>'
 		html += '<div id="edit-answers-holder" style="display:' + display + ';">'
 		for (key in obj.label) {
 			count = Number(key) + 1
-			html += '<label for="options-answer-' + key + '">Answer ' + (Number(key) + 1) + '</label><input id="options-answer-' + key + '" type="text" name="options[label][' + key + ']" value="" required="required">'
-			html += '<label for="options-default-' + key + '">default?<br></label><input id="options-default-' + key + '" type="radio" name="options[default]" value="' + key + '"'
+			html += '<label for="options-answer-' + key + '">Answer ' + (Number(key) + 1) +
+				'</label><input id="options-answer-' + key + '" type="text" name="options[label][' + key +
+				']" value="" required="required">'
+			html += '<label for="options-default-' + key + '">default?<br></label><input id="options-default-' + key +
+				'" type="radio" name="options[default]" value="' + key + '"'
 			if (key == obj['default']) {
 				html += ' checked="checked"'
 			}
 			html += '>'
 		}
-		html += '<p>other:</p>'
-		html += '<input type="button" name="options-default-none" value="Clear default" />'
+		html += '<p><input type="button" name="options-default-none" value="' + wwm_as_admin_script.clear_default +
+			'" /></p>'
 		html += '</div>'
 	}
 	if ('undefined' != typeof obj.validation && 'undefined' != typeof obj.validation.rules) {
 		for (index in obj.validation.rules) {
-			html += '<input type="hidden" name="options[validation][rules][' + index + ']" value="' + obj.validation.rules[index] + '">'
+			html += '<input type="hidden" name="options[validation][rules][' + index + ']" value="' + obj.validation.rules[
+				index] + '">'
 		}
 	}
 
@@ -408,4 +425,25 @@ function removeNulls(elementsJSON) {
 		}
 	}
 	return (temp.length > 0) ? temp : null
+}
+
+function fixConditionals(startingIndex, endingIndex, $) {
+	var elementsJSON = $.parseJSON($('#existing_elements').val())
+	var matchIndex = /(?!\[).*(?=\[)/
+	for (index in elementsJSON) {
+		if (typeof elementsJSON[index].validation.rules.conditional_on != 'undefined') {
+			qIndex = parseInt(elementsJSON[index].validation.rules.conditional_on.match(matchIndex)[0])
+			changeIndex = ((startingIndex - endingIndex) > 0) ? 1 : -1
+			minVal = Math.max(qIndex - 1, 0)
+			newIndex = ((startingIndex - endingIndex) > 0) ? (qIndex + 1) : minVal
+			if (startingIndex == qIndex) {
+				newIndex = endingIndex
+			}
+			if (qIndex <= Math.max(startingIndex, endingIndex) && qIndex >= Math.min(startingIndex, endingIndex)) {
+				elementsJSON[index].validation.rules.conditional_on = elementsJSON[index].validation.rules.conditional_on.replace(
+					matchIndex, newIndex)
+			}
+		}
+	}
+	$('#existing_elements').val(JSON.stringify(elementsJSON)).trigger('change')
 }
